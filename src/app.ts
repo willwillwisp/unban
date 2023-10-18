@@ -30,7 +30,7 @@ const doc = new GoogleSpreadsheet(GOOGLE_SHEET, serviceAccountAuth);
 const ruleEvery5Seconds = new schedule.RecurrenceRule();
 const ruleEveryDay = new schedule.RecurrenceRule();
 
-const every5Seconds = new schedule.Range(0, 60, 10);
+const every5Seconds = new schedule.Range(0, 60, 5);
 ruleEvery5Seconds.second = every5Seconds;
 
 const everyDay = new schedule.Range(0, 6);

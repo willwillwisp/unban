@@ -6,7 +6,11 @@ import { groupBy } from "./utils";
 export const unbanMembersWithExpiredSubscription = async (doc: GoogleSpreadsheet, bot: Telegraf, sheetName: string, chatId: number) => {
   const sheet = doc.sheetsByTitle[sheetName];
 
-  await sheet.loadCells();
+  await sheet.loadCells({
+    startRowIndex: 0,
+    startColumnIndex: 0,
+    endColumnIndex: 2
+  });
 
   const columnIndex = {
     id: 0,
@@ -66,7 +70,11 @@ export const unbanMembersWithExpiredSubscription = async (doc: GoogleSpreadsheet
 const highlightUnbanIdInGoogleSheet = async (doc: GoogleSpreadsheet, sheetName: string, id: number) => {
   const sheet = doc.sheetsByTitle[sheetName];
 
-  await sheet.loadCells();
+  await sheet.loadCells({
+    startRowIndex: 0,
+    startColumnIndex: 0,
+    endColumnIndex: 2
+  });
 
   const columnIndex = {
     id: 0,
