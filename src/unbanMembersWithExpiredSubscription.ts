@@ -9,7 +9,7 @@ export const unbanMembersWithExpiredSubscription = async (doc: GoogleSpreadsheet
   await sheet.loadCells({
     startRowIndex: 0,
     startColumnIndex: 0,
-    endColumnIndex: 2
+    endColumnIndex: 2,
   });
 
   const columnIndex = {
@@ -73,7 +73,7 @@ const highlightUnbanIdInGoogleSheet = async (doc: GoogleSpreadsheet, sheetName: 
   await sheet.loadCells({
     startRowIndex: 0,
     startColumnIndex: 0,
-    endColumnIndex: 2
+    endColumnIndex: 2,
   });
 
   const columnIndex = {
