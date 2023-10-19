@@ -43,7 +43,7 @@ void doc.loadInfo().then(() => {
     void unbanMembersWithExpiredSubscription(doc, bot, SHEET_NAME, parseInt(CHAT_ID));
   });
 
-  console.log("Bot started! v1");
+  console.log("Bot started! v1.1");
   console.log(schedule.scheduledJobs.unban ? "Unban job scheduled!" : "Error while scheduling unban!");
 });
 
