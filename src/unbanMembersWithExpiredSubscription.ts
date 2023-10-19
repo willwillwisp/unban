@@ -27,11 +27,12 @@ export const unbanMembersWithExpiredSubscription = async (doc: GoogleSpreadsheet
   };
 
   while (row.id && row.date) {
-    subscriptionsList.push({
-      id: row.id,
-      date: row.date,
-    });
-
+    if (!isNaN(parseFloat(row.date))) {
+      subscriptionsList.push({
+        id: row.id,
+        date: parseFloat(row.date),
+      });
+    }
     rowIndex++;
 
     row = {
@@ -50,7 +51,7 @@ export const unbanMembersWithExpiredSubscription = async (doc: GoogleSpreadsheet
       const member = await bot.telegram.getChatMember(chatId, parseInt(maxDateSub.id));
 
       if (member.status !== "kicked" && member.status !== "left") {
-        const subDateJS = new Date(Date.UTC(0, 0, parseFloat(maxDateSub.date) - 1));
+        const subDateJS = new Date(Date.UTC(0, 0, maxDateSub.date - 1));
         const subDateLuxon = DateTime.fromJSDate(subDateJS);
         const now = DateTime.now().minus({ hours: 3 });
 
