@@ -27,7 +27,12 @@ export const unbanMembersWithExpiredSubscription = async (doc: GoogleSpreadsheet
   };
 
   while (row.id && row.date) {
+    console.log(row.date);
+    
     if (!isNaN(parseFloat(row.date))) {
+      console.log(parseFloat(row.date));
+      
+
       subscriptionsList.push({
         id: row.id,
         date: parseFloat(row.date),
