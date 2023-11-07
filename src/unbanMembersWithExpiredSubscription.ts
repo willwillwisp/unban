@@ -44,6 +44,8 @@ export const unbanMembersWithExpiredSubscription = async (doc: GoogleSpreadsheet
   const groupedSubscriptionList = groupBy(subscriptionsList, (i) => i.id);
   const subs = Object.values(groupedSubscriptionList);
 
+  const idsToHighlight = [];
+
   for (const sub of subs) {
     const maxDateSub = sub.reduce((max, game) => (max.date > game.date ? max : game));
 
@@ -59,16 +61,20 @@ export const unbanMembersWithExpiredSubscription = async (doc: GoogleSpreadsheet
           await bot.telegram.unbanChatMember(chatId, member.user.id);
           console.log(`Unban ${member.user.id}`);
 
-          await highlightUnbanIdInGoogleSheet(doc, sheetName, member.user.id);
+          idsToHighlight.push(member.user.id);
         }
       }
     } catch (err) {
       // Member not found
     }
   }
+
+  await highlightUnbanIdInGoogleSheet(doc, sheetName, idsToHighlight);
 };
 
-const highlightUnbanIdInGoogleSheet = async (doc: GoogleSpreadsheet, sheetName: string, id: number) => {
+const highlightUnbanIdInGoogleSheet = async (doc: GoogleSpreadsheet, sheetName: string, idsToHighlight: number[]) => {
+  const idsToHighlightString = idsToHighlight.map((id) => id.toString());
+
   const sheet = doc.sheetsByTitle[sheetName];
 
   await sheet.loadCells({
@@ -90,7 +96,7 @@ const highlightUnbanIdInGoogleSheet = async (doc: GoogleSpreadsheet, sheetName: 
   };
 
   while (typeof row.id.value === "number" || typeof row.id.value === "string") {
-    if (row.id.value.toString() === id.toString()) {
+    if (idsToHighlightString.includes(row.id.value.toString())) {
       const highlightStyle = {
         rgbColor: {
           red: 1,
