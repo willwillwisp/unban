@@ -78,7 +78,11 @@ export const unbanMembersWithExpiredSubscription = async (doc: GoogleSpreadsheet
     const now = DateTime.now().minus({ hours: 3 });
 
     if (subDateLuxon.plus({ days: 30 }) < now) {
-      await bot.telegram.unbanChatMember(chatId, memberData.user.id);
+      try {
+        await bot.telegram.unbanChatMember(chatId, memberData.user.id);
+      } catch {
+        // Chat owner TODO: fix
+      }
       console.log(`Unban ${memberData.user.id}`);
 
       idsToHighlight.push(memberData.user.id);
