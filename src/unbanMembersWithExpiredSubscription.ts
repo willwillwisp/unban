@@ -1,6 +1,7 @@
-import { GoogleSpreadsheet } from "google-spreadsheet";
+import { GoogleSpreadsheet, GoogleSpreadsheetWorksheet } from "google-spreadsheet";
 import { DateTime } from "luxon";
 import { Telegraf } from "telegraf";
+import { ChatMember } from "typegram";
 import { groupBy } from "./utils";
 
 export const unbanMembersWithExpiredSubscription = async (doc: GoogleSpreadsheet, bot: Telegraf, sheetName: string, chatId: number) => {
@@ -29,7 +30,7 @@ export const unbanMembersWithExpiredSubscription = async (doc: GoogleSpreadsheet
   while (row.id && row.date) {
     if (!isNaN(parseFloat(row.date))) {
       subscriptionsList.push({
-        id: row.id,
+        id: parseInt(row.id),
         date: parseFloat(row.date),
       });
     }
@@ -44,44 +45,53 @@ export const unbanMembersWithExpiredSubscription = async (doc: GoogleSpreadsheet
   const groupedSubscriptionList = groupBy(subscriptionsList, (i) => i.id);
   const subs = Object.values(groupedSubscriptionList);
 
-  const idsToHighlight = [];
+  const idsToHighlight: number[] = [];
 
-  for (const sub of subs) {
+  const promises: Promise<ChatMember>[] = [];
+
+  subs.forEach((sub) => {
+    const maxDateSub = sub.reduce((max, game) => (max.date > game.date ? max : game));
+    const memberPromise = bot.telegram.getChatMember(chatId, maxDateSub.id);
+
+    promises.push(memberPromise);
+  });
+
+  const sheetIdsPromises = await Promise.allSettled(promises);
+
+  const chatMemberPromises = sheetIdsPromises.filter((member) => member.status === "fulfilled");
+
+  for (const chatMemberPromise of chatMemberPromises) {
+    if (chatMemberPromise.status !== "fulfilled") continue;
+
+    const memberData = chatMemberPromise.value;
+
+    const sub = subs.find((sub) => sub[0].id === memberData.user.id);
+
+    if (!sub) continue;
+
     const maxDateSub = sub.reduce((max, game) => (max.date > game.date ? max : game));
 
-    try {
-      const member = await bot.telegram.getChatMember(chatId, parseInt(maxDateSub.id));
+    if (memberData.status === "kicked" || memberData.status === "left") continue;
 
-      if (member.status !== "kicked" && member.status !== "left") {
-        const subDateJS = new Date(Date.UTC(0, 0, maxDateSub.date - 1));
-        const subDateLuxon = DateTime.fromJSDate(subDateJS);
-        const now = DateTime.now().minus({ hours: 3 });
+    const subDateJS = new Date(Date.UTC(0, 0, maxDateSub.date - 1));
+    const subDateLuxon = DateTime.fromJSDate(subDateJS);
+    const now = DateTime.now().minus({ hours: 3 });
 
-        if (subDateLuxon.plus({ days: 30 }) < now) {
-          await bot.telegram.unbanChatMember(chatId, member.user.id);
-          console.log(`Unban ${member.user.id}`);
+    if (subDateLuxon.plus({ days: 30 }) < now) {
+      await bot.telegram.unbanChatMember(chatId, memberData.user.id);
+      console.log(`Unban ${memberData.user.id}`);
 
-          idsToHighlight.push(member.user.id);
-        }
-      }
-    } catch (err) {
-      // Member not found
+      idsToHighlight.push(memberData.user.id);
     }
   }
 
-  await highlightUnbanIdInGoogleSheet(doc, sheetName, idsToHighlight);
+  highlightUnbanIdInGoogleSheet(sheet, sheetName, idsToHighlight);
+
+  await sheet.saveUpdatedCells(); // save all updates in one call
 };
 
-const highlightUnbanIdInGoogleSheet = async (doc: GoogleSpreadsheet, sheetName: string, idsToHighlight: number[]) => {
+const highlightUnbanIdInGoogleSheet = (sheet: GoogleSpreadsheetWorksheet, sheetName: string, idsToHighlight: number[]) => {
   const idsToHighlightString = idsToHighlight.map((id) => id.toString());
-
-  const sheet = doc.sheetsByTitle[sheetName];
-
-  await sheet.loadCells({
-    startRowIndex: 0,
-    startColumnIndex: 0,
-    endColumnIndex: 2,
-  });
 
   const columnIndex = {
     id: 0,
@@ -116,6 +126,4 @@ const highlightUnbanIdInGoogleSheet = async (doc: GoogleSpreadsheet, sheetName: 
       date: sheet.getCell(rowIndex, columnIndex.date),
     };
   }
-
-  await sheet.saveUpdatedCells(); // save all updates in one call
 };
