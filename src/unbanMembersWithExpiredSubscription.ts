@@ -71,7 +71,13 @@ export const unbanMembersWithExpiredSubscription = async (doc: GoogleSpreadsheet
 
     const maxDateSub = sub.reduce((max, game) => (max.date > game.date ? max : game));
 
-    if (memberData.status === "kicked" || memberData.status === "left") continue;
+    if (
+      memberData.status === "kicked" ||
+      memberData.status === "left" ||
+      memberData.status === "creator" ||
+      memberData.status === "administrator"
+    )
+      continue;
 
     const subDateJS = new Date(Date.UTC(0, 0, maxDateSub.date - 1));
     const subDateLuxon = DateTime.fromJSDate(subDateJS);
