@@ -1,10 +1,31 @@
 import { GoogleSpreadsheet, GoogleSpreadsheetWorksheet } from "google-spreadsheet";
 import { DateTime } from "luxon";
 import { Telegraf } from "telegraf";
-import { ChatMember } from "typegram";
+import { getSubscribersInChat, Subscription } from "./getChatMembers";
+import { iterateGoogleSpreadsheet } from "./iterateGoogleSpreadsheet";
 import { groupBy } from "./utils";
 
-export const unbanMembersWithExpiredSubscription = async (doc: GoogleSpreadsheet, bot: Telegraf, sheetName: string, chatId: number) => {
+/**
+ * The function `unbanMembersWithExpiredSubscription` takes a Google Spreadsheet, a Telegram bot, a
+ * sheet name, and a chat ID as input, and it iterates over the spreadsheet to find members with
+ * expired subscriptions in the specified chat, unbans them, and highlights their IDs in the
+ * spreadsheet.
+ * @param {GoogleSpreadsheet} doc - The `doc` parameter is a Google Spreadsheet document object. It
+ * represents the Google Spreadsheet that contains the subscription data.
+ * @param {Telegraf} bot - The `bot` parameter is an instance of the Telegraf library, which is used
+ * for interacting with the Telegram Bot API. It is used to unban chat members by calling the
+ * `unbanChatMember` method.
+ * @param {string} sheetName - The `sheetName` parameter is a string that represents the name of the
+ * sheet in the Google Spreadsheet where the subscription data is stored.
+ * @param {number} chatId - The `chatId` parameter is the ID of the Telegram chat where the members are
+ * banned.
+ */
+export const unbanMembersWithExpiredSubscription = async (
+  doc: GoogleSpreadsheet,
+  bot: Telegraf,
+  sheetName: string,
+  chatId: number
+) => {
   const sheet = doc.sheetsByTitle[sheetName];
 
   await sheet.loadCells({
@@ -13,107 +34,88 @@ export const unbanMembersWithExpiredSubscription = async (doc: GoogleSpreadsheet
     endColumnIndex: 2,
   });
 
-  const columnIndex = {
-    id: 0,
-    date: 1,
-  };
+  const subscriptionsList: Subscription[] = [];
 
-  const subscriptionsList = [];
-
-  let rowIndex = 0;
-
-  let row = {
-    id: sheet.getCell(rowIndex, columnIndex.id).value?.toString(),
-    date: sheet.getCell(rowIndex, columnIndex.date).value?.toString(),
-  };
-
-  while (row.id && row.date) {
-    if (!isNaN(parseFloat(row.date))) {
-      subscriptionsList.push({
-        id: parseInt(row.id),
-        date: parseFloat(row.date),
-      });
-    }
-    rowIndex++;
-
-    row = {
-      id: sheet.getCell(rowIndex, columnIndex.id).value?.toString(),
-      date: sheet.getCell(rowIndex, columnIndex.date).value?.toString(),
-    };
-  }
-
-  const groupedSubscriptionList = groupBy(subscriptionsList, (i) => i.id);
-  const subs = Object.values(groupedSubscriptionList);
-
-  const idsToHighlight: number[] = [];
-
-  const promises: Promise<ChatMember>[] = [];
-
-  subs.forEach((sub) => {
-    const maxDateSub = sub.reduce((max, game) => (max.date > game.date ? max : game));
-    const memberPromise = bot.telegram.getChatMember(chatId, maxDateSub.id);
-
-    promises.push(memberPromise);
+  iterateGoogleSpreadsheet(sheet, (id, date) => {
+    subscriptionsList.push({
+      id: id,
+      date: date,
+    });
   });
 
-  const sheetIdsPromises = await Promise.allSettled(promises);
+  /**
+   * Grouping the `subscriptionsList` array by the `id` property of each object in the array.
+   */
+  const groupedSubscriptionList = groupBy(subscriptionsList, (i) => i.id);
+  const subscribers = Object.values(groupedSubscriptionList);
 
-  const chatMemberPromises = sheetIdsPromises.filter((member) => member.status === "fulfilled");
+  /**
+   * `idsToHighlight` is an array that stores the IDs of chat members who need to be highlighted
+   * in the Google Sheet. These members have expired subscriptions and should be unbanned. The
+   * array is populated during the iteration over the `subscribers` array, and the IDs are added
+   * to `idsToHighlight` if the member's subscription date is more than 30 days in the past.
+   * Later, the `highlightUnbanIdInGoogleSheet` function uses this array to apply a highlight
+   * style to the corresponding rows in the Google Sheet.
+   */
+  const idsToHighlight: number[] = [];
 
-  for (const chatMemberPromise of chatMemberPromises) {
-    if (chatMemberPromise.status !== "fulfilled") continue;
+  const subscribersInChat = await getSubscribersInChat(bot, chatId, subscribers);
 
-    const memberData = chatMemberPromise.value;
+  for (const subscriber of subscribersInChat) {
+    const datesForSubscriber = subscribers.find((sub) => sub[0].id === subscriber.user.id);
 
-    const sub = subs.find((sub) => sub[0].id === memberData.user.id);
+    if (!datesForSubscriber) continue;
 
-    if (!sub) continue;
+    // Find sub with last subscription date.
+    const lastSubscription = datesForSubscriber.reduce((max, curr) => (max.date > curr.date ? max : curr));
 
-    const maxDateSub = sub.reduce((max, game) => (max.date > game.date ? max : game));
+    // Skip iteration if member was in chat but kicked/left or creator/administrator.
+    // Statuses listed in telegram bot api.
+    const skipStatuses = ["kicked", "left", "creator", "administrator"];
 
-    if (
-      memberData.status === "kicked" ||
-      memberData.status === "left" ||
-      memberData.status === "creator" ||
-      memberData.status === "administrator"
-    )
-      continue;
+    if (skipStatuses.includes(subscriber.status)) continue;
 
-    const subDateJS = new Date(Date.UTC(0, 0, maxDateSub.date - 1));
-    const subDateLuxon = DateTime.fromJSDate(subDateJS);
-    const now = DateTime.now().minus({ hours: 3 });
+    // Luxon DateTime object.
+    const subscriptionDateLuxon = lastSubscription.date;
 
-    if (subDateLuxon.plus({ days: 30 }) < now) {
-      await bot.telegram.unbanChatMember(chatId, memberData.user.id);
+    // Dates in google spreadsheet are in UTC.
+    const now = DateTime.now().setZone("UTC");
 
-      console.log(`Unban ${memberData.user.id}`);
+    // Subscription expires within 30 days
+    if (subscriptionDateLuxon.plus({ days: 30 }) < now) {
+      await bot.telegram.unbanChatMember(chatId, subscriber.user.id);
 
-      idsToHighlight.push(memberData.user.id);
+      console.log(`Unban ${subscriber.user.id}`);
+
+      idsToHighlight.push(subscriber.user.id);
     }
   }
 
-  highlightUnbanIdInGoogleSheet(sheet, sheetName, idsToHighlight);
+  highlightUnbanIdInGoogleSheet(sheet, idsToHighlight);
 
-  await sheet.saveUpdatedCells(); // save all updates in one call
+  // Save all updates in one call.
+  await sheet.saveUpdatedCells();
 };
 
-const highlightUnbanIdInGoogleSheet = (sheet: GoogleSpreadsheetWorksheet, sheetName: string, idsToHighlight: number[]) => {
+/**
+ * The function `highlightUnbanIdInGoogleSheet` takes a Google Spreadsheet worksheet and an array of
+ * IDs to highlight, and it iterates through the spreadsheet to find matching IDs and highlights them.
+ * @param {GoogleSpreadsheetWorksheet} sheet - The `sheet` parameter is the Google Spreadsheet
+ * worksheet object that you want to highlight the IDs in.
+ * @param {number[]} idsToHighlight - An array of numbers representing the IDs that need to be
+ * highlighted in the Google Sheet.
+ */
+const highlightUnbanIdInGoogleSheet = (sheet: GoogleSpreadsheetWorksheet, idsToHighlight: number[]) => {
   const idsToHighlightString = idsToHighlight.map((id) => id.toString());
 
-  const columnIndex = {
-    id: 0,
-    date: 1,
-  };
-
-  let rowIndex = 0;
-
-  let row = {
-    id: sheet.getCell(rowIndex, columnIndex.id),
-    date: sheet.getCell(rowIndex, columnIndex.date),
-  };
-
-  while (typeof row.id.value === "number" || typeof row.id.value === "string") {
-    if (idsToHighlightString.includes(row.id.value.toString())) {
+  iterateGoogleSpreadsheet(sheet, (id, date, idCell, dateCell) => {
+    if (idsToHighlightString.includes(id.toString())) {
+      /** The `highlightStyle` constant is an object that represents the style for highlighting cells in
+       * the Google Spreadsheet. It uses the `rgbColor` property to specify the color of the highlight.
+       * In this case, the highlight color is red, as indicated by the `red: 1, green: 0, blue: 0`
+       * values. This means that the cells with expired subscription IDs and dates will be highlighted
+       * in red in the Google Spreadsheet.
+       */
       const highlightStyle = {
         rgbColor: {
           red: 1,
@@ -122,15 +124,8 @@ const highlightUnbanIdInGoogleSheet = (sheet: GoogleSpreadsheetWorksheet, sheetN
         },
       };
 
-      row.id.backgroundColorStyle = highlightStyle;
-      row.date.backgroundColorStyle = highlightStyle;
+      idCell.backgroundColorStyle = highlightStyle;
+      dateCell.backgroundColorStyle = highlightStyle;
     }
-
-    rowIndex++;
-
-    row = {
-      id: sheet.getCell(rowIndex, columnIndex.id),
-      date: sheet.getCell(rowIndex, columnIndex.date),
-    };
-  }
+  });
 };
