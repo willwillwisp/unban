@@ -1,9 +1,9 @@
 import { GoogleSpreadsheet, GoogleSpreadsheetWorksheet } from "google-spreadsheet";
 import { DateTime } from "luxon";
 import { Telegraf } from "telegraf";
-import { getSubscribersInChat, Subscription } from "./getChatMembers";
+import { getSubscribersInChat, Subscription } from "./getSubscribersInChat";
 import { iterateGoogleSpreadsheet } from "./iterateGoogleSpreadsheet";
-import { groupBy } from "./utils";
+import { groupBy } from "./utils/groupBy";
 
 /**
  * The function `unbanMembersWithExpiredSubscription` takes a Google Spreadsheet, a Telegram bot, a
@@ -20,14 +20,16 @@ import { groupBy } from "./utils";
  * @param {number} chatId - The `chatId` parameter is the ID of the Telegram chat where the members are
  * banned.
  */
-export const unbanMembersWithExpiredSubscription = async (
+export async function unbanMembersWithExpiredSubscription(
   doc: GoogleSpreadsheet,
   bot: Telegraf,
   sheetName: string,
   chatId: number
-) => {
+) {
   const sheet = doc.sheetsByTitle[sheetName];
 
+  // Load to memory all rows and only first 3 columns.
+  // Note: Size of all table cells (without limits) ~1.5GB RAM :)
   await sheet.loadCells({
     startRowIndex: 0,
     startColumnIndex: 0,
@@ -69,10 +71,10 @@ export const unbanMembersWithExpiredSubscription = async (
     // Find sub with last subscription date.
     const lastSubscription = datesForSubscriber.reduce((max, curr) => (max.date > curr.date ? max : curr));
 
-    // Skip iteration if member was in chat but kicked/left or creator/administrator.
     // Statuses listed in telegram bot api.
     const skipStatuses = ["kicked", "left", "creator", "administrator"];
 
+    // Skip iteration if member was in chat but kicked/left or creator/administrator.
     if (skipStatuses.includes(subscriber.status)) continue;
 
     // Luxon DateTime object.
@@ -81,7 +83,7 @@ export const unbanMembersWithExpiredSubscription = async (
     // Dates in google spreadsheet are in UTC.
     const now = DateTime.now().setZone("UTC");
 
-    // Subscription expires within 30 days
+    // Subscription expires within 30 days.
     if (subscriptionDateLuxon.plus({ days: 30 }) < now) {
       await bot.telegram.unbanChatMember(chatId, subscriber.user.id);
 
@@ -91,11 +93,11 @@ export const unbanMembersWithExpiredSubscription = async (
     }
   }
 
-  highlightUnbanIdInGoogleSheet(sheet, idsToHighlight);
+  highlightIdsInGoogleSheet(sheet, idsToHighlight);
 
   // Save all updates in one call.
   await sheet.saveUpdatedCells();
-};
+}
 
 /**
  * The function `highlightUnbanIdInGoogleSheet` takes a Google Spreadsheet worksheet and an array of
@@ -105,11 +107,9 @@ export const unbanMembersWithExpiredSubscription = async (
  * @param {number[]} idsToHighlight - An array of numbers representing the IDs that need to be
  * highlighted in the Google Sheet.
  */
-const highlightUnbanIdInGoogleSheet = (sheet: GoogleSpreadsheetWorksheet, idsToHighlight: number[]) => {
-  const idsToHighlightString = idsToHighlight.map((id) => id.toString());
-
+const highlightIdsInGoogleSheet = (sheet: GoogleSpreadsheetWorksheet, idsToHighlight: number[]) => {
   iterateGoogleSpreadsheet(sheet, (id, date, idCell, dateCell) => {
-    if (idsToHighlightString.includes(id.toString())) {
+    if (idsToHighlight.includes(id)) {
       /** The `highlightStyle` constant is an object that represents the style for highlighting cells in
        * the Google Spreadsheet. It uses the `rgbColor` property to specify the color of the highlight.
        * In this case, the highlight color is red, as indicated by the `red: 1, green: 0, blue: 0`
