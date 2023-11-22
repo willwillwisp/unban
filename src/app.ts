@@ -1,8 +1,8 @@
 import "dotenv/config";
-import { Telegraf } from "telegraf";
 import * as schedule from "node-schedule";
-import { GoogleDocAuth } from "./auth/GoogleSheetsAuth";
-import { scheduleUnbanTask } from "./scheduleUnbanTask";
+import { Telegraf } from "telegraf";
+import { getDocWithAuth } from "./google-spreadsheet/getDocWithAuth";
+import { scheduleUnbanTask } from "./node-schedule/scheduleUnbanTask";
 
 const BOT_TOKEN = process.env.BOT_TOKEN;
 const GOOGLE_SHEET = process.env.GOOGLE_SHEET;
@@ -15,14 +15,14 @@ if (!BOT_TOKEN || !CHAT_ID || !GOOGLE_SHEET || !SHEET_NAME) {
 
 const bot = new Telegraf(BOT_TOKEN);
 
-const doc = new GoogleDocAuth().getDocWithAuth(GOOGLE_SHEET);
+const doc = getDocWithAuth(GOOGLE_SHEET);
 
 void doc.loadInfo().then(() => {
   void bot.launch();
 
   scheduleUnbanTask(doc, bot, SHEET_NAME, parseInt(CHAT_ID));
 
-  console.log("Bot started! v1.3");
+  console.log(`Bot started! v${process.env.npm_package_version}`);
   console.log(schedule.scheduledJobs.unban ? "Unban job scheduled!" : "Error while scheduling unban!");
 });
 

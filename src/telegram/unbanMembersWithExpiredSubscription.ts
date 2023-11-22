@@ -1,9 +1,10 @@
 import { GoogleSpreadsheet, GoogleSpreadsheetWorksheet } from "google-spreadsheet";
-import { DateTime } from "luxon";
+import { DateTime, Duration } from "luxon";
 import { Telegraf } from "telegraf";
-import { getSubscribersInChat, Subscription } from "./getSubscribersInChat";
-import { iterateGoogleSpreadsheet } from "./iterateGoogleSpreadsheet";
-import { groupBy } from "./utils/groupBy";
+import { getSubscribersInChat } from "./getSubscribersInChat";
+import { iterateGoogleSpreadsheet } from "../google-spreadsheet/iterateGoogleSpreadsheet";
+import { SheetDurationStatus, Subscription } from "../types/Subscription";
+import { groupBy } from "../utils/groupBy";
 
 /**
  * The function `unbanMembersWithExpiredSubscription` takes a Google Spreadsheet, a Telegram bot, a
@@ -28,21 +29,18 @@ export async function unbanMembersWithExpiredSubscription(
 ) {
   const sheet = doc.sheetsByTitle[sheetName];
 
-  // Load to memory all rows and only first 3 columns.
+  // Load to memory all rows and only first 4 columns.
   // Note: Size of all table cells (without limits) ~1.5GB RAM :)
   await sheet.loadCells({
     startRowIndex: 0,
     startColumnIndex: 0,
-    endColumnIndex: 2,
+    endColumnIndex: 3,
   });
 
   const subscriptionsList: Subscription[] = [];
 
-  iterateGoogleSpreadsheet(sheet, (id, date) => {
-    subscriptionsList.push({
-      id: id,
-      date: date,
-    });
+  iterateGoogleSpreadsheet(sheet, (subscription) => {
+    subscriptionsList.push(subscription);
   });
 
   /**
@@ -80,42 +78,54 @@ export async function unbanMembersWithExpiredSubscription(
     // Luxon DateTime object.
     const subscriptionDateLuxon = lastSubscription.date;
 
-    // Dates in google spreadsheet are in UTC.
-    const now = DateTime.now().setZone("UTC");
+    const now = DateTime.now().setZone("UTC+3");
 
-    // Subscription expires within 30 days.
-    if (subscriptionDateLuxon.plus({ days: 30 }) < now) {
+    // Subscription expires within 30 days by default.
+    let durationToAdd = Duration.fromObject({ days: 30 });
+
+    // If last sub duration is valid Duration (Luxon) object.
+    if (lastSubscription.duration instanceof Duration && lastSubscription.duration.isValid) {
+      // Set durationToAdd to valid Duration (Luxon) object from lastSub.
+      durationToAdd = lastSubscription.duration;
+    }
+
+    const expireDate = subscriptionDateLuxon.plus(durationToAdd);
+    const isSubscriptionInfinite = lastSubscription.duration === SheetDurationStatus.INFINITE;
+    const isSubscriptionExpired = expireDate < now;
+
+    // If last sub duration status is not INFINITE and subscription expired.
+    if (!isSubscriptionInfinite && isSubscriptionExpired) {
       await bot.telegram.unbanChatMember(chatId, subscriber.user.id);
 
-      console.log(`Unban ${subscriber.user.id}`);
+      console.log(`--Unban ${subscriber.user.id}--`);
+      console.log("Подписка: ", lastSubscription.date.toString());
+      console.log("Истечение: ", expireDate.toString());
+      console.log("Сейчас: ", now.toString());
+      console.log("Длительность", expireDate.diff(lastSubscription.date, "days").toHuman());
 
       idsToHighlight.push(subscriber.user.id);
     }
   }
 
-  highlightIdsInGoogleSheet(sheet, idsToHighlight);
+  highlightRowsInGoogleSheet(sheet, idsToHighlight);
 
   // Save all updates in one call.
   await sheet.saveUpdatedCells();
 }
 
 /**
- * The function `highlightUnbanIdInGoogleSheet` takes a Google Spreadsheet worksheet and an array of
- * IDs to highlight, and it iterates through the spreadsheet to find matching IDs and highlights them.
+ * The function `highlightRowsInGoogleSheet` takes a Google Spreadsheet worksheet and an array of IDs
+ * to highlight, and sets the background color of specific rows in the spreadsheet to red.
  * @param {GoogleSpreadsheetWorksheet} sheet - The `sheet` parameter is the Google Spreadsheet
- * worksheet object that you want to highlight the IDs in.
- * @param {number[]} idsToHighlight - An array of numbers representing the IDs that need to be
- * highlighted in the Google Sheet.
+ * worksheet object on which you want to highlight rows.
+ * @param {number[]} idsToHighlight - An array of numbers representing the IDs of the rows that need to
+ * be highlighted in the Google Spreadsheet.
  */
-const highlightIdsInGoogleSheet = (sheet: GoogleSpreadsheetWorksheet, idsToHighlight: number[]) => {
-  iterateGoogleSpreadsheet(sheet, (id, date, idCell, dateCell) => {
-    if (idsToHighlight.includes(id)) {
-      /** The `highlightStyle` constant is an object that represents the style for highlighting cells in
-       * the Google Spreadsheet. It uses the `rgbColor` property to specify the color of the highlight.
-       * In this case, the highlight color is red, as indicated by the `red: 1, green: 0, blue: 0`
-       * values. This means that the cells with expired subscription IDs and dates will be highlighted
-       * in red in the Google Spreadsheet.
-       */
+const highlightRowsInGoogleSheet = (sheet: GoogleSpreadsheetWorksheet, idsToHighlight: number[]) => {
+  if (idsToHighlight.length === 0) return;
+
+  iterateGoogleSpreadsheet(sheet, (subscription, cellData) => {
+    if (idsToHighlight.includes(subscription.id)) {
       const highlightStyle = {
         rgbColor: {
           red: 1,
@@ -124,8 +134,10 @@ const highlightIdsInGoogleSheet = (sheet: GoogleSpreadsheetWorksheet, idsToHighl
         },
       };
 
-      idCell.backgroundColorStyle = highlightStyle;
-      dateCell.backgroundColorStyle = highlightStyle;
+      // Setting the background color of the cells in the Google Spreadsheet.
+      cellData.id.backgroundColorStyle = highlightStyle;
+      cellData.date.backgroundColorStyle = highlightStyle;
+      cellData.duration.backgroundColorStyle = highlightStyle;
     }
   });
 };

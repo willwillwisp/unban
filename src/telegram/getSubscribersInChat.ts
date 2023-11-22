@@ -1,16 +1,6 @@
-import { DateTime } from "luxon";
 import { Telegraf } from "telegraf";
 import { ChatMember } from "typegram";
-
-export interface Subscription {
-  id: number;
-  date: DateTime;
-}
-
-export type Subscribers = {
-  id: number;
-  date: DateTime;
-}[][];
+import { Subscribers } from "../types/Subscription";
 
 /**
  * The function `getSubscribersInChat` takes a Telegram bot, chat ID, and a list of subscribers, and
